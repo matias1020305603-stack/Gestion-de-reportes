@@ -1,0 +1,105 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny all documents
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidUser(data) {
+      return data.userId is string && data.userId == request.auth.uid &&
+             data.username is string && data.username.size() >= 3 && data.username.size() <= 30 &&
+             data.fullName is string && data.fullName.size() >= 2 && data.fullName.size() <= 100 &&
+             data.email is string && data.email.size() <= 120 &&
+             data.role in ['Estudiante', 'Profesor', 'Servicios Generales'] &&
+             data.avatarId is int && data.avatarId >= 1 && data.avatarId <= 20 &&
+             data.avatarColorHex is string && data.avatarColorHex.size() <= 16;
+    }
+
+    function isValidReport(data) {
+      return data.userId is string &&
+             data.code is string && data.code.size() <= 32 &&
+             data.title is string && data.title.size() >= 3 && data.title.size() <= 150 &&
+             data.description is string && data.description.size() >= 5 && data.description.size() <= 2000 &&
+             data.location is string && data.location.size() >= 2 && data.location.size() <= 100 &&
+             data.category is string && data.category.size() <= 50 &&
+             data.severity in ['BAJA', 'MEDIA', 'ALTA', 'CRITICA'] &&
+             data.status in ['ABIERTO', 'EN_PROCESO', 'RESUELTO', 'CERRADO'] &&
+             data.authorName is string && data.authorName.size() <= 100 &&
+             data.authorRole is string && data.authorRole.size() <= 50 &&
+             data.authorEmail is string && data.authorEmail.size() <= 120 &&
+             (!('assignedTo' in data) || (data.assignedTo is string && data.assignedTo.size() <= 100)) &&
+             (!('resolutionNotes' in data) || (data.resolutionNotes is string && data.resolutionNotes.size() <= 2000));
+    }
+
+    // User Profiles
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+
+      allow create: if isOwner(userId) &&
+                       incoming().userId == request.auth.uid &&
+                       incoming().createdAt is timestamp && incoming().createdAt <= request.time &&
+                       incoming().updatedAt is timestamp && incoming().updatedAt <= request.time &&
+                       incoming().keys().hasAll(['userId', 'username', 'fullName', 'email', 'role', 'avatarId', 'avatarColorHex', 'createdAt', 'updatedAt']) &&
+                       isValidUser(incoming());
+
+      allow update: if isOwner(userId) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().updatedAt is timestamp && incoming().updatedAt <= request.time &&
+                       isValidUser(incoming()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['username', 'fullName', 'avatarId', 'avatarColorHex', 'updatedAt']);
+
+      allow delete: if isOwner(userId);
+    }
+
+    // Incident & Maintenance Reports
+    match /reports/{reportId} {
+      allow get: if isSignedIn() && (resource.data.userId == request.auth.uid);
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid);
+
+      allow create: if isSignedIn() &&
+                       incoming().userId == request.auth.uid &&
+                       incoming().createdAt is timestamp && incoming().createdAt <= request.time &&
+                       incoming().updatedAt is timestamp && incoming().updatedAt <= request.time &&
+                       incoming().keys().hasAll(['userId', 'code', 'title', 'description', 'location', 'category', 'severity', 'status', 'authorName', 'authorRole', 'authorEmail', 'createdAt', 'updatedAt']) &&
+                       isValidReport(incoming());
+
+      allow update: if isSignedIn() &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().updatedAt is timestamp && incoming().updatedAt <= request.time &&
+                       isValidReport(incoming()) &&
+                       (
+                         // Action: Author edits content
+                         (existing().userId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'description', 'location', 'category', 'severity', 'updatedAt'])) ||
+                         // Action: Status transition & notes update
+                         (incoming().diff(existing()).affectedKeys().hasOnly(['status', 'assignedTo', 'resolutionNotes', 'updatedAt']))
+                       );
+
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+  }
+}

@@ -1,0 +1,134 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "User profile with role and avatar customization",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "The unique Firebase Auth UID"
+        },
+        "username": {
+          "type": "string",
+          "description": "Validated username"
+        },
+        "fullName": {
+          "type": "string",
+          "description": "Full name of the user"
+        },
+        "email": {
+          "type": "string",
+          "description": "Institutional or registered email"
+        },
+        "role": {
+          "type": "string",
+          "description": "User role: Estudiante, Profesor, or Servicios Generales"
+        },
+        "avatarId": {
+          "type": "integer",
+          "description": "Selected avatar identifier (1-20)"
+        },
+        "avatarColorHex": {
+          "type": "string",
+          "description": "Hex color code for the border"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of registration"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update"
+        }
+      },
+      "required": ["userId", "username", "fullName", "email", "role", "avatarId", "avatarColorHex", "createdAt", "updatedAt"]
+    },
+    "Report": {
+      "title": "Incident Report",
+      "description": "Maintenance and incident report submitted by school members",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "UID of the author who submitted the report"
+        },
+        "code": {
+          "type": "string",
+          "description": "Sequential report code (e.g. REP-101)"
+        },
+        "title": {
+          "type": "string",
+          "description": "Summary title of the issue"
+        },
+        "description": {
+          "type": "string",
+          "description": "Detailed explanation of the damage or incident"
+        },
+        "location": {
+          "type": "string",
+          "description": "Classroom, lab or campus facility"
+        },
+        "category": {
+          "type": "string",
+          "description": "Report category"
+        },
+        "severity": {
+          "type": "string",
+          "description": "BAJA, MEDIA, ALTA, or CRITICA"
+        },
+        "status": {
+          "type": "string",
+          "description": "ABIERTO, EN_PROCESO, RESUELTO, or CERRADO"
+        },
+        "authorName": {
+          "type": "string",
+          "description": "Full name of the creator"
+        },
+        "authorRole": {
+          "type": "string",
+          "description": "Role of creator"
+        },
+        "authorEmail": {
+          "type": "string",
+          "description": "Contact email of creator"
+        },
+        "assignedTo": {
+          "type": "string",
+          "description": "Assigned technician"
+        },
+        "resolutionNotes": {
+          "type": "string",
+          "description": "Notes added when solved"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last update timestamp"
+        }
+      },
+      "required": ["userId", "code", "title", "description", "location", "category", "severity", "status", "authorName", "authorRole", "authorEmail", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": {
+        "$ref": "#/entities/User"
+      },
+      "description": "Individual user profiles stored by UID"
+    },
+    "/reports/{reportId}": {
+      "schema": {
+        "$ref": "#/entities/Report"
+      },
+      "description": "Institutional damage and incident reports"
+    }
+  }
+}
