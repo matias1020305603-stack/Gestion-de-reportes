@@ -40,4 +40,6 @@ class TaskReportRepository(
         userDao.updateUserPassword(userId, newPassword)
     suspend fun updateUserEmail(userId: Long, newEmail: String) =
         userDao.updateUserEmail(userId, newEmail)
+    suspend fun ensurePreconfiguredServiciosAccounts() =
+        com.example.data.local.AppDatabase.ensureServiciosAccounts(userDao)
 }

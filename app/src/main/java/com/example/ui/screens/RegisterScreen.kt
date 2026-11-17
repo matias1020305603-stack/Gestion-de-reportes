@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.example.data.model.UserRoles
 import com.example.ui.components.GlowingButton
+import com.example.ui.components.PrivacyPolicyPdfDialog
 import com.example.ui.components.TechTextField
 import com.example.ui.theme.TechColors
 import com.example.ui.viewmodel.MainViewModel
@@ -89,8 +90,13 @@ fun RegisterScreen(
     // Step 2 Fields: Username with strict profanity & sensual restrictions
     var username by remember { mutableStateOf("") }
 
-    // Errors
+    // Errors & Privacy PDF modal
     var errorMessage by remember { mutableStateOf("") }
+    var showPrivacyPdfDialog by remember { mutableStateOf(false) }
+
+    if (showPrivacyPdfDialog) {
+        PrivacyPolicyPdfDialog(onDismiss = { showPrivacyPdfDialog = false })
+    }
 
     val usernameValidation = remember(username) {
         if (username.isBlank()) null
@@ -620,7 +626,14 @@ fun RegisterScreen(
                 modifier = Modifier.testTag("reg_confirm_pass_field")
             )
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(14.dp))
+
+            PrivacyPdfCardBanner(
+                onClick = { showPrivacyPdfDialog = true },
+                modifier = Modifier.testTag("register_privacy_card_step1")
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
 
             // Botón para avanzar al Paso 2: Elección de Nombre de Usuario
             GlowingButton(
@@ -798,7 +811,14 @@ fun RegisterScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(14.dp))
+
+            PrivacyPdfCardBanner(
+                onClick = { showPrivacyPdfDialog = true },
+                modifier = Modifier.testTag("register_privacy_card_step2")
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
 
             // Botón Final de Registro
             GlowingButton(
@@ -840,6 +860,20 @@ fun RegisterScreen(
         }
 
         Spacer(modifier = Modifier.height(16.dp))
+
+        // Política de Privacidad y Gestión de Datos (PDF)
+        TextButton(
+            onClick = { showPrivacyPdfDialog = true },
+            modifier = Modifier.testTag("register_privacy_terms_btn")
+        ) {
+            Text(
+                text = "Política de Privacidad y Gestión de Datos (Ver PDF)",
+                color = TechColors.NeonCyan,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center
+            )
+        }
 
         // Volver a Iniciar Sesión
         TextButton(
@@ -1451,6 +1485,67 @@ private fun RoleSelectionCard(
                 lineHeight = 12.sp,
                 maxLines = 2,
                 textAlign = TextAlign.Center
+            )
+        }
+    }
+}
+
+@Composable
+private fun PrivacyPdfCardBanner(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = TechColors.TechCard),
+        border = CardDefaults.outlinedCardBorder().copy(
+            brush = androidx.compose.ui.graphics.SolidColor(TechColors.NeonCyan.copy(alpha = 0.5f))
+        ),
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .clickable { onClick() }
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(38.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(TechColors.NeonCyan.copy(alpha = 0.14f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.PictureAsPdf,
+                    contentDescription = "Abrir Política de Privacidad PDF",
+                    tint = TechColors.NeonCyan,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Política de Privacidad y Gestión de Datos",
+                    color = TechColors.NeonCyan,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "Toca aquí para leer el documento oficial (PDF)",
+                    color = TechColors.TextSecondary,
+                    fontSize = 11.sp
+                )
+            }
+            Icon(
+                imageVector = Icons.Default.ChevronRight,
+                contentDescription = null,
+                tint = TechColors.NeonCyan,
+                modifier = Modifier.size(20.dp)
             )
         }
     }

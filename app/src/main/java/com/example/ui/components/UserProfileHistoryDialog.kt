@@ -71,6 +71,7 @@ fun UserProfileHistoryDialog(
     var showChangePasswordDialog by remember { mutableStateOf(false) }
     var showChangeEmailDialog by remember { mutableStateOf(false) }
     var showSchoolRulesDialog by remember { mutableStateOf(false) }
+    var showPrivacyPolicyDialog by remember { mutableStateOf(false) }
     var showLogoutConfirmation by remember { mutableStateOf(false) }
     var cacheCleanedMessage by remember { mutableStateOf<String?>(null) }
 
@@ -87,9 +88,6 @@ fun UserProfileHistoryDialog(
     val resolvedCount = userReports.count { it.status == ReportStatus.RESUELTO.name }
     val inProcessCount = userReports.count { it.status == ReportStatus.EN_PROCESO.name }
     val openCount = userReports.count { it.status == ReportStatus.ABIERTO.name }
-
-    // Reddit-style Karma calculation: base points per report + bonus for solved
-    val karmaScore = (userReports.size * 25) + (resolvedCount * 50) + 120
 
     // Settings preferences state (collected from viewModel or remembered local fallback)
     val isCompactView = viewModel?.isCompactView?.collectAsStateWithLifecycle()?.value ?: false
@@ -274,35 +272,35 @@ fun UserProfileHistoryDialog(
 
                         Spacer(modifier = Modifier.height(12.dp))
 
-                        // Reddit Karma & Stats Bar
+                        // Institutional Stats Bar
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(12.dp))
                                 .background(TechColors.DeepCharcoal.copy(alpha = 0.7f))
+                                .border(
+                                    width = 1.dp,
+                                    color = TechColors.NeonCyan.copy(alpha = 0.25f),
+                                    shape = RoundedCornerShape(12.dp)
+                                )
                                 .padding(horizontal = 12.dp, vertical = 8.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(
-                                    Icons.Default.Star,
+                                    Icons.Default.School,
                                     contentDescription = null,
-                                    tint = Color(0xFFFFD700),
+                                    tint = TechColors.NeonCyan,
                                     modifier = Modifier.size(16.dp)
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    text = "$karmaScore",
-                                    color = TechColors.TextPrimary,
+                                    text = "REDENTORISTAS",
+                                    color = TechColors.NeonCyan,
                                     fontWeight = FontWeight.ExtraBold,
-                                    fontSize = 13.sp
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = "Karma de reporte",
-                                    color = TechColors.TextSecondary,
-                                    fontSize = 11.sp
+                                    fontSize = 12.sp,
+                                    letterSpacing = 1.2.sp
                                 )
                             }
 
@@ -431,6 +429,7 @@ fun UserProfileHistoryDialog(
                                 onChangePasswordClick = { showChangePasswordDialog = true },
                                 onChangeEmailClick = { showChangeEmailDialog = true },
                                 onShowRulesClick = { showSchoolRulesDialog = true },
+                                onShowPrivacyClick = { showPrivacyPolicyDialog = true },
                                 onToggleCompact = { viewModel?.toggleCompactView(it) },
                                 onToggleNotifications = { viewModel?.toggleNotifications(it) },
                                 onToggleHighPriority = { viewModel?.toggleHighPriorityAlerts(it) },
@@ -544,6 +543,11 @@ fun UserProfileHistoryDialog(
     // 3. School Rules Dialog (Reddit-Style Guidelines)
     if (showSchoolRulesDialog) {
         SchoolRulesModal(onDismiss = { showSchoolRulesDialog = false })
+    }
+
+    // 3b. Official Privacy Policy PDF Dialog
+    if (showPrivacyPolicyDialog) {
+        PrivacyPolicyPdfDialog(onDismiss = { showPrivacyPolicyDialog = false })
     }
 
     // 4. Logout Confirmation Dialog
@@ -691,6 +695,7 @@ private fun RedditSettingsContent(
     onChangePasswordClick: () -> Unit,
     onChangeEmailClick: () -> Unit,
     onShowRulesClick: () -> Unit,
+    onShowPrivacyClick: () -> Unit,
     onToggleCompact: (Boolean) -> Unit,
     onToggleNotifications: (Boolean) -> Unit,
     onToggleHighPriority: (Boolean) -> Unit,
@@ -889,6 +894,23 @@ private fun RedditSettingsContent(
                         )
                     },
                     onClick = onShowRulesClick
+                )
+
+                HorizontalDivider(color = TechColors.DeepCharcoal, thickness = 1.dp)
+
+                RedditSettingRow(
+                    icon = Icons.Default.PrivacyTip,
+                    title = "Política de Privacidad y Gestión de Datos",
+                    subtitle = "Documento oficial PDF (Cámara, galería y tratamiento de datos)",
+                    trailing = {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowForwardIos,
+                            contentDescription = null,
+                            tint = TechColors.TextSecondary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    },
+                    onClick = onShowPrivacyClick
                 )
 
                 HorizontalDivider(color = TechColors.DeepCharcoal, thickness = 1.dp)
@@ -1227,7 +1249,8 @@ private fun SchoolRulesModal(onDismiss: () -> Unit) {
         "1. Identifica con precisión la ubicación del daño (ej. Aula 302, Laboratorio de Química, Baño 2° piso)." to "Permite al equipo de Servicios Generales llegar rápidamente al lugar.",
         "2. Selecciona la severidad adecuada (Baja, Media, Alta o Crítica)." to "Las incidencias que involucren riesgo eléctrico o de agua tienen prioridad crítica.",
         "3. Evita duplicar reportes existentes." to "Revisa en la lista de 'Abiertos' si otro estudiante o profesor ya reportó la misma novedad.",
-        "4. Cuidado de las instalaciones institucionales." to "El reporte ayuda a mantener el colegio en condiciones óptimas para toda la comunidad."
+        "4. Cuidado de las instalaciones institucionales." to "El reporte ayuda a mantener el colegio en condiciones óptimas para toda la comunidad.",
+        "5. Privacidad de Cámara, Galería y Contenido Apto." to "La cámara y galería se usan solo para evidencias de reportes; está prohibido subir imágenes sensuales o inapropiadas."
     )
 
     Dialog(onDismissRequest = onDismiss) {

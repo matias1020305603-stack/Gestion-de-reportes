@@ -38,6 +38,7 @@ data class ReportEntity(
     val location: String = "Planta Principal",
     val reportedBy: String = "Operador",
     val resolutionNotes: String = "",
+    val imagePath: String = "",
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis()
 )

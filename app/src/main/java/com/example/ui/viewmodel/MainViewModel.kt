@@ -22,6 +22,15 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import android.net.Uri
+import com.example.data.model.ChatMessage
+import com.example.data.model.FriendContact
+import com.example.data.model.SocialComment
+import com.example.data.model.SocialPost
+import com.example.data.model.UserRoles
+import com.example.util.ContentModerator
+import com.example.util.ImageModerationResult
+import com.example.util.ImageSafetyModerator
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -42,6 +51,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     init {
         val database = AppDatabase.getDatabase(application, viewModelScope)
         repository = TaskReportRepository(database.taskDao(), database.reportDao(), database.userDao())
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            repository.ensurePreconfiguredServiciosAccounts()
+        }
     }
 
     // --- Authentication & Session State ---
@@ -144,6 +156,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     return@launch
                 }
                 _currentUser.value = user
+                _activeChatFriend.value = null
                 _isAuthDialogOpen.value = false
                 onResult(true, "¡Bienvenido, ${user.fullName} (${user.role})!")
             } else {
@@ -168,7 +181,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 onResult(false, "Por favor completa todos los campos requeridos")
                 return@launch
             }
-            if (role == com.example.data.model.UserRoles.SERVICIOS_GENERALES) {
+            if (role == UserRoles.SERVICIOS_GENERALES) {
                 onResult(false, "Las cuentas de Servicios Generales son asignadas por la administración del colegio. No requieren registrarse.")
                 return@launch
             }
@@ -195,32 +208,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val newId = repository.registerUser(newUser)
             val created = newUser.copy(id = newId)
             _currentUser.value = created
+            _activeChatFriend.value = null
             _isAuthDialogOpen.value = false
             onResult(true, "Registro exitoso como $role")
         }
     }
 
     fun logout() {
+        _activeChatFriend.value = null
         _currentUser.value = null
     }
 
     fun quickLoginAs(role: String) {
         viewModelScope.launch {
             val username = when (role) {
-                com.example.data.model.UserRoles.SERVICIOS_GENERALES -> "servicios"
-                com.example.data.model.UserRoles.PROFESOR -> "profesor"
+                UserRoles.SERVICIOS_GENERALES -> "servicios"
+                UserRoles.PROFESOR -> "profesor"
                 else -> "estudiante"
             }
             val user = repository.findUserByUsername(username)
             if (user != null) {
                 _currentUser.value = user
+                _activeChatFriend.value = null
                 _isAuthDialogOpen.value = false
             } else {
                 val tempUser = UserEntity(
                     username = username,
                     fullName = when (role) {
-                        com.example.data.model.UserRoles.SERVICIOS_GENERALES -> "Mario Gómez (Servicios Generales)"
-                        com.example.data.model.UserRoles.PROFESOR -> "Prof. Andrés Castro"
+                        UserRoles.SERVICIOS_GENERALES -> "Mario Gómez (Servicios Generales)"
+                        UserRoles.PROFESOR -> "Prof. Andrés Castro"
                         else -> "Camila Torres (Estudiante)"
                     },
                     password = "123",
@@ -228,6 +244,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
                 val id = repository.registerUser(tempUser)
                 _currentUser.value = tempUser.copy(id = id)
+                _activeChatFriend.value = null
                 _isAuthDialogOpen.value = false
             }
         }
@@ -420,12 +437,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // Report Actions
+    // Report Actions & Image Moderation
+    private val _reportImageModeration = MutableStateFlow<ImageModerationResult>(ImageModerationResult.Idle)
+    val reportImageModeration: StateFlow<ImageModerationResult> = _reportImageModeration.asStateFlow()
+
+    fun validateReportImage(uri: Uri) {
+        viewModelScope.launch {
+            _reportImageModeration.value = ImageModerationResult.Checking
+            _reportImageModeration.value = ImageSafetyModerator.moderateImageUri(getApplication(), uri)
+        }
+    }
+
+    fun resetReportImageModeration() {
+        _reportImageModeration.value = ImageModerationResult.Idle
+    }
+
     fun openCreateReportDialog() {
+        _reportImageModeration.value = ImageModerationResult.Idle
         _isReportDialogOpen.value = true
     }
 
     fun closeReportDialog() {
+        _reportImageModeration.value = ImageModerationResult.Idle
         _isReportDialogOpen.value = false
     }
 
@@ -443,9 +476,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         category: String,
         severity: String,
         location: String,
-        reportedBy: String
+        reportedBy: String,
+        imageUriString: String? = null
     ) {
         viewModelScope.launch {
+            val savedImagePath = if (!imageUriString.isNullOrBlank()) {
+                if (_reportImageModeration.value !is ImageModerationResult.Approved) {
+                    return@launch
+                }
+                copyImageToInternalStorage(imageUriString)
+            } else {
+                ""
+            }
             val count = allReports.value.size + 101
             val reportCode = "REP-$count"
             val userAuthor = _currentUser.value?.fullName ?: reportedBy.ifBlank { "Operador" }
@@ -458,7 +500,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     severity = severity,
                     status = ReportStatus.ABIERTO.name,
                     location = if (location.isBlank()) "Área de Planta" else location.trim(),
-                    reportedBy = userAuthor
+                    reportedBy = userAuthor,
+                    imagePath = savedImagePath
                 )
             )
 
@@ -488,6 +531,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private suspend fun copyImageToInternalStorage(uriString: String): String =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val context = getApplication<Application>()
+                val uri = android.net.Uri.parse(uriString)
+                val imagesDir = java.io.File(context.filesDir, "report_images").apply { mkdirs() }
+                val destFile = java.io.File(imagesDir, "rep_${System.currentTimeMillis()}.jpg")
+                context.contentResolver.openInputStream(uri)?.use { input ->
+                    destFile.outputStream().use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                if (destFile.exists() && destFile.length() > 0) destFile.absolutePath else ""
+            } catch (_: Exception) {
+                ""
+            }
+        }
+
     fun updateReportStatus(reportId: Long, newStatus: String, notes: String) {
         viewModelScope.launch {
             repository.updateReportStatus(reportId, newStatus, notes.trim())
@@ -504,6 +565,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun deleteReport(report: ReportEntity) {
         viewModelScope.launch {
+            if (report.imagePath.isNotBlank()) {
+                try {
+                    java.io.File(report.imagePath).delete()
+                } catch (_: Exception) {}
+            }
             repository.deleteReport(report)
             if (_selectedReportDetail.value?.id == report.id) {
                 _selectedReportDetail.value = null
@@ -513,6 +579,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearAllReports() {
         viewModelScope.launch {
+            try {
+                val imagesDir = java.io.File(getApplication<Application>().filesDir, "report_images")
+                if (imagesDir.exists()) imagesDir.deleteRecursively()
+            } catch (_: Exception) {}
             repository.clearAllReports()
             _selectedReportDetail.value = null
         }
@@ -575,7 +645,392 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val id = repository.registerUser(newUser)
                 user = newUser.copy(id = id)
             }
+            _activeChatFriend.value = null
             _currentUser.value = user
         }
+    }
+
+    // --- Social Feed State & Methods (Moderated community feed) ---
+    private val _socialImageModeration = MutableStateFlow<ImageModerationResult>(ImageModerationResult.Idle)
+    val socialImageModeration: StateFlow<ImageModerationResult> = _socialImageModeration.asStateFlow()
+
+    fun validateSocialImage(uri: Uri) {
+        viewModelScope.launch {
+            _socialImageModeration.value = ImageModerationResult.Checking
+            _socialImageModeration.value = ImageSafetyModerator.moderateImageUri(getApplication(), uri)
+        }
+    }
+
+    fun resetSocialImageModeration() {
+        _socialImageModeration.value = ImageModerationResult.Idle
+    }
+
+    private val _socialPosts = MutableStateFlow<List<SocialPost>>(
+        listOf(
+            SocialPost(
+                authorName = "Carlos Pérez",
+                authorRole = "Estudiante",
+                avatarId = 1,
+                avatarColorHex = "#00FFFF",
+                content = "Se reporta daño en la llave de agua del segundo piso del bloque B. Hay una pequeña fuga. #Planta #Daños",
+                imageUrl = "https://picsum.photos/400/300",
+                timestamp = "Hace 15 min",
+                likesCount = 4,
+                comments = listOf(
+                    SocialComment(
+                        authorName = "Prof. Andrea Gómez",
+                        authorRole = "Profesor",
+                        avatarId = 2,
+                        avatarColorHex = "#FF00FF",
+                        text = "Gracias por reportarlo Carlos, lo notificaremos a Servicios Generales.",
+                        timestamp = "Hace 10 min"
+                    )
+                )
+            ),
+            SocialPost(
+                authorName = "Servicios Generales CSR",
+                authorRole = UserRoles.SERVICIOS_GENERALES,
+                avatarId = 3,
+                avatarColorHex = "#34C759",
+                content = "Atendiendo revisión de luminarias en el salón 201. Todo en orden por ahora. ¡Buen día a todos!",
+                timestamp = "Hace 1 hora",
+                likesCount = 9
+            )
+        )
+    )
+    val socialPosts: StateFlow<List<SocialPost>> = _socialPosts.asStateFlow()
+
+    fun createSocialPost(
+        content: String,
+        imageUrl: String?,
+        localImageUriString: String? = null
+    ): Pair<Boolean, String?> {
+        val check = ContentModerator.checkContent(content)
+        if (!check.first) {
+            return check
+        }
+        val trimmedUrl = imageUrl?.trim()?.ifBlank { null }
+        if (trimmedUrl != null) {
+            val urlCheck = ContentModerator.checkContent(trimmedUrl)
+            if (!urlCheck.first) {
+                return Pair(false, "La URL o enlace de imagen contiene términos no permitidos.")
+            }
+        }
+        if (!localImageUriString.isNullOrBlank()) {
+            when (val modState = _socialImageModeration.value) {
+                is ImageModerationResult.Approved -> Unit
+                is ImageModerationResult.Checking ->
+                    return Pair(false, "Espera a que termine la verificación de seguridad de la imagen.")
+                is ImageModerationResult.Rejected ->
+                    return Pair(false, "Imagen bloqueada: ${modState.reason}")
+                is ImageModerationResult.Error ->
+                    return Pair(false, modState.message)
+                is ImageModerationResult.Idle ->
+                    return Pair(false, "Debes validar la imagen seleccionada antes de publicar.")
+            }
+        }
+
+        val user = _currentUser.value
+        val authorName = user?.fullName ?: "Usuario Anónimo"
+        val authorRole = user?.role ?: UserRoles.ESTUDIANTE
+        val avatarId = user?.avatarId ?: 1
+        val avatarColorHex = user?.avatarColorHex ?: "#00FFFF"
+
+        if (!localImageUriString.isNullOrBlank()) {
+            viewModelScope.launch {
+                val savedPath = copyImageToInternalStorage(localImageUriString)
+                val finalImageRef = savedPath.ifBlank { localImageUriString }
+                val newPost = SocialPost(
+                    authorName = authorName,
+                    authorRole = authorRole,
+                    avatarId = avatarId,
+                    avatarColorHex = avatarColorHex,
+                    content = content.trim(),
+                    imageUrl = finalImageRef,
+                    timestamp = "Hace un momento"
+                )
+                _socialPosts.value = listOf(newPost) + _socialPosts.value
+                _socialImageModeration.value = ImageModerationResult.Idle
+            }
+            return Pair(true, null)
+        }
+
+        val newPost = SocialPost(
+            authorName = authorName,
+            authorRole = authorRole,
+            avatarId = avatarId,
+            avatarColorHex = avatarColorHex,
+            content = content.trim(),
+            imageUrl = trimmedUrl,
+            timestamp = "Hace un momento"
+        )
+        _socialPosts.value = listOf(newPost) + _socialPosts.value
+        return Pair(true, null)
+    }
+
+    fun toggleLikePost(postId: String) {
+        _socialPosts.value = _socialPosts.value.map { post ->
+            if (post.id == postId) {
+                val newLiked = !post.isLikedByMe
+                post.copy(
+                    isLikedByMe = newLiked,
+                    likesCount = if (newLiked) post.likesCount + 1 else maxOf(0, post.likesCount - 1)
+                )
+            } else {
+                post
+            }
+        }
+    }
+
+    fun addCommentToPost(postId: String, commentText: String): Pair<Boolean, String?> {
+        val check = ContentModerator.checkContent(commentText)
+        if (!check.first) {
+            return check
+        }
+        val user = _currentUser.value
+        val authorName = user?.fullName ?: "Usuario Anónimo"
+        val authorRole = user?.role ?: UserRoles.ESTUDIANTE
+        val avatarId = user?.avatarId ?: 1
+        val avatarColorHex = user?.avatarColorHex ?: "#00FFFF"
+
+        val comment = SocialComment(
+            authorName = authorName,
+            authorRole = authorRole,
+            avatarId = avatarId,
+            avatarColorHex = avatarColorHex,
+            text = commentText.trim(),
+            timestamp = "Hace un momento"
+        )
+
+        _socialPosts.value = _socialPosts.value.map { post ->
+            if (post.id == postId) {
+                post.copy(comments = post.comments + comment)
+            } else {
+                post
+            }
+        }
+        return Pair(true, null)
+    }
+
+    // --- Chat / Amigos State & Methods (Estricto aislamiento por grupo/rol) ---
+    fun normalizeRoleGroup(role: String?): String {
+        val normalized = role?.trim()?.lowercase(Locale.ROOT).orEmpty()
+        return when {
+            normalized.contains("profesor") -> UserRoles.PROFESOR
+            normalized.contains("servicios") || normalized.contains("serv.") || normalized.contains("mantenimiento") ->
+                UserRoles.SERVICIOS_GENERALES
+            else -> UserRoles.ESTUDIANTE
+        }
+    }
+
+    private val institutionalDirectoryPeers = listOf(
+        FriendContact(
+            id = "dir_prof_1",
+            name = "Prof. Roberto Méndez",
+            role = UserRoles.PROFESOR,
+            avatarId = 2,
+            avatarColorHex = "#FF00FF",
+            lastMessage = "Revisé el reporte del salón 201.",
+            isOnline = true
+        ),
+        FriendContact(
+            id = "dir_prof_2",
+            name = "Prof. Andrea Gómez",
+            role = UserRoles.PROFESOR,
+            avatarId = 6,
+            avatarColorHex = "#00FFFF",
+            lastMessage = "¿Confirmamos la revisión del laboratorio?",
+            isOnline = true
+        ),
+        FriendContact(
+            id = "dir_prof_3",
+            name = "Prof. Claudia Navarro",
+            role = UserRoles.PROFESOR,
+            avatarId = 8,
+            avatarColorHex = "#9D4EDD",
+            lastMessage = "Coordinemos la sala de profesores.",
+            isOnline = false
+        ),
+        FriendContact(
+            id = "dir_est_1",
+            name = "Lucía Martínez",
+            role = UserRoles.ESTUDIANTE,
+            avatarId = 4,
+            avatarColorHex = "#00FFFF",
+            lastMessage = "¿Pudiste reportar la fuga de agua?",
+            isOnline = true
+        ),
+        FriendContact(
+            id = "dir_est_2",
+            name = "Carlos Pérez",
+            role = UserRoles.ESTUDIANTE,
+            avatarId = 1,
+            avatarColorHex = "#FFCC00",
+            lastMessage = "Ya tomé foto del bloque B.",
+            isOnline = true
+        ),
+        FriendContact(
+            id = "dir_est_3",
+            name = "Santiago Mora",
+            role = UserRoles.ESTUDIANTE,
+            avatarId = 7,
+            avatarColorHex = "#39FF14",
+            lastMessage = "Nos vemos en el patio central.",
+            isOnline = false
+        ),
+        FriendContact(
+            id = "dir_serv_1",
+            name = "Mantenimiento General",
+            role = UserRoles.SERVICIOS_GENERALES,
+            avatarId = 5,
+            avatarColorHex = "#34C759",
+            lastMessage = "Entendido, acudiremos al bloque C.",
+            isOnline = true
+        )
+    )
+
+    private val _allFriendsPool = MutableStateFlow<List<FriendContact>>(
+        listOf(
+            institutionalDirectoryPeers[0], // Prof. Roberto Méndez
+            institutionalDirectoryPeers[3], // Lucía Martínez
+            institutionalDirectoryPeers[6]  // Mantenimiento General
+        )
+    )
+
+    val friendsList: StateFlow<List<FriendContact>> = combine(
+        _allFriendsPool,
+        _currentUser
+    ) { pool, user ->
+        val userGroup = normalizeRoleGroup(user?.role)
+        val selfName = user?.fullName?.trim()?.lowercase(Locale.ROOT)
+        pool.filter { contact ->
+            normalizeRoleGroup(contact.role) == userGroup &&
+                (selfName == null || contact.name.trim().lowercase(Locale.ROOT) != selfName)
+        }
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = emptyList()
+    )
+
+    val availablePeersToAdd: StateFlow<List<FriendContact>> = combine(
+        repository.allUsers,
+        friendsList,
+        _currentUser
+    ) { dbUsers, activeFriends, currentUser ->
+        val userGroup = normalizeRoleGroup(currentUser?.role)
+        val selfUsername = currentUser?.username?.trim()?.lowercase(Locale.ROOT)
+        val selfName = currentUser?.fullName?.trim()?.lowercase(Locale.ROOT)
+        val activeNames = activeFriends.map { it.name.trim().lowercase(Locale.ROOT) }.toSet()
+
+        val dbContacts = dbUsers
+            .filter { normalizeRoleGroup(it.role) == userGroup }
+            .filter { u ->
+                val uname = u.username.trim().lowercase(Locale.ROOT)
+                val fname = u.fullName.trim().lowercase(Locale.ROOT)
+                uname != selfUsername && fname != selfName
+            }
+            .map { u ->
+                FriendContact(
+                    id = "user_${u.id}_${u.username}",
+                    name = u.fullName,
+                    role = normalizeRoleGroup(u.role),
+                    avatarId = u.avatarId,
+                    avatarColorHex = u.avatarColorHex,
+                    lastMessage = "Miembro de $userGroup • Disponible para chatear",
+                    isOnline = true
+                )
+            }
+
+        val directorySameGroup = institutionalDirectoryPeers
+            .filter { normalizeRoleGroup(it.role) == userGroup }
+            .filter { peer ->
+                val pname = peer.name.trim().lowercase(Locale.ROOT)
+                selfName == null || pname != selfName
+            }
+
+        (dbContacts + directorySameGroup)
+            .distinctBy { it.name.trim().lowercase(Locale.ROOT) }
+            .filter { !activeNames.contains(it.name.trim().lowercase(Locale.ROOT)) }
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = emptyList()
+    )
+
+    private val _activeChatFriend = MutableStateFlow<FriendContact?>(null)
+    val activeChatFriend: StateFlow<FriendContact?> = _activeChatFriend.asStateFlow()
+
+    private val _chatMessagesMap = MutableStateFlow<Map<String, List<ChatMessage>>>(emptyMap())
+    val chatMessagesMap: StateFlow<Map<String, List<ChatMessage>>> = _chatMessagesMap.asStateFlow()
+
+    fun addPeerToChat(peer: FriendContact): Pair<Boolean, String?> {
+        val currentGroup = normalizeRoleGroup(_currentUser.value?.role)
+        if (normalizeRoleGroup(peer.role) != currentGroup) {
+            return Pair(
+                false,
+                "Solo puedes agregar y chatear con personas de tu mismo grupo ($currentGroup)."
+            )
+        }
+        val normalizedPeer = peer.copy(role = currentGroup)
+        val existing = _allFriendsPool.value.find {
+            it.name.equals(normalizedPeer.name, ignoreCase = true) &&
+                normalizeRoleGroup(it.role) == currentGroup
+        }
+        val target = existing ?: normalizedPeer.also {
+            _allFriendsPool.value = listOf(it) + _allFriendsPool.value
+        }
+        openChatWith(target)
+        return Pair(true, null)
+    }
+
+    fun openChatWith(friend: FriendContact): Boolean {
+        val currentGroup = normalizeRoleGroup(_currentUser.value?.role)
+        if (normalizeRoleGroup(friend.role) != currentGroup) {
+            return false
+        }
+        _activeChatFriend.value = friend
+        if (!_chatMessagesMap.value.containsKey(friend.id)) {
+            val initialMsg = ChatMessage(
+                senderId = friend.id,
+                text = friend.lastMessage,
+                timestamp = "Hace 5 min",
+                isFromMe = false
+            )
+            _chatMessagesMap.value = _chatMessagesMap.value + (friend.id to listOf(initialMsg))
+        }
+        return true
+    }
+
+    fun closeChat() {
+        _activeChatFriend.value = null
+    }
+
+    fun sendChatMessage(friendId: String, text: String): Pair<Boolean, String?> {
+        val target = _allFriendsPool.value.find { it.id == friendId }
+        val currentGroup = normalizeRoleGroup(_currentUser.value?.role)
+        if (target != null && normalizeRoleGroup(target.role) != currentGroup) {
+            return Pair(false, "Solo puedes chatear con personas de tu mismo grupo ($currentGroup).")
+        }
+        val check = ContentModerator.checkContent(text)
+        if (!check.first) {
+            return check
+        }
+        val trimmed = text.trim()
+        val userMsg = ChatMessage(
+            senderId = "me",
+            text = trimmed,
+            timestamp = "Hace un momento",
+            isFromMe = true
+        )
+
+        val currentList = _chatMessagesMap.value[friendId] ?: emptyList()
+        _chatMessagesMap.value = _chatMessagesMap.value + (friendId to (currentList + userMsg))
+
+        _allFriendsPool.value = _allFriendsPool.value.map { f ->
+            if (f.id == friendId) f.copy(lastMessage = "Tú: $trimmed") else f
+        }
+
+        return Pair(true, null)
     }
 }

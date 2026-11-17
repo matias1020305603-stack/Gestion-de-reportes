@@ -35,16 +35,20 @@ import com.example.ui.components.ReportDetailDialog
 import com.example.ui.components.UserProfileHistoryDialog
 import com.example.ui.components.getAvatarDrawableRes
 import com.example.ui.components.hexToColor
+import com.example.ui.screens.ChatScreen
 import com.example.ui.screens.LoginScreen
 import com.example.ui.screens.RegisterScreen
 import com.example.ui.screens.ReportsScreen
+import com.example.ui.screens.SocialFeedScreen
 import com.example.ui.screens.SummaryScreen
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.viewmodel.MainViewModel
+import com.example.util.configureAppCheck
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        configureAppCheck(this, intent)
         enableEdgeToEdge()
         setContent {
             MyApplicationTheme {
@@ -104,15 +108,17 @@ fun MainDashboard(
     val isProfileOpen by viewModel.isProfileOpen.collectAsStateWithLifecycle()
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
     val allReports by viewModel.allReports.collectAsStateWithLifecycle()
+    val activeChatFriend by viewModel.activeChatFriend.collectAsStateWithLifecycle()
 
     var userMenuExpanded by remember { mutableStateOf(false) }
 
-    BackHandler(enabled = isProfileOpen || isAvatarPickerOpen || selectedTab != 0 || isReportDialogOpen || selectedReportDetail != null) {
+    BackHandler(enabled = isProfileOpen || isAvatarPickerOpen || activeChatFriend != null || selectedTab != 0 || isReportDialogOpen || selectedReportDetail != null) {
         when {
             isProfileOpen -> viewModel.closeProfile()
             isAvatarPickerOpen -> viewModel.closeAvatarPicker()
             selectedReportDetail != null -> viewModel.closeReportDetail()
             isReportDialogOpen -> viewModel.closeReportDialog()
+            selectedTab == 2 && activeChatFriend != null -> viewModel.closeChat()
             selectedTab != 0 -> viewModel.selectTab(0)
         }
     }
@@ -138,6 +144,8 @@ fun MainDashboard(
                             Text(
                                 text = when (selectedTab) {
                                     0 -> "Reportes e Incidencias"
+                                    1 -> "Muro Comunitario"
+                                    2 -> "Mensajes Directos"
                                     else -> "Métricas de Atención"
                                 },
                                 fontWeight = FontWeight.Bold,
@@ -289,6 +297,20 @@ fun MainDashboard(
                     NavigationBarItem(
                         selected = selectedTab == 1,
                         onClick = { viewModel.selectTab(1) },
+                        icon = { Icon(Icons.Default.Forum, contentDescription = "Muro") },
+                        label = { Text("Muro") },
+                        modifier = Modifier.testTag("nav_tab_social")
+                    )
+                    NavigationBarItem(
+                        selected = selectedTab == 2,
+                        onClick = { viewModel.selectTab(2) },
+                        icon = { Icon(Icons.Default.Chat, contentDescription = "Chat") },
+                        label = { Text("Chat") },
+                        modifier = Modifier.testTag("nav_tab_chat")
+                    )
+                    NavigationBarItem(
+                        selected = selectedTab == 3,
+                        onClick = { viewModel.selectTab(3) },
                         icon = { Icon(Icons.Default.BarChart, contentDescription = "Métricas") },
                         label = { Text("Métricas") },
                         modifier = Modifier.testTag("nav_tab_summary")
@@ -318,7 +340,13 @@ fun MainDashboard(
                         viewModel = viewModel,
                         onSelectReport = { report -> viewModel.openReportDetail(report) }
                     )
-                    1 -> SummaryScreen(
+                    1 -> SocialFeedScreen(
+                        viewModel = viewModel
+                    )
+                    2 -> ChatScreen(
+                        viewModel = viewModel
+                    )
+                    else -> SummaryScreen(
                         viewModel = viewModel
                     )
                 }
@@ -350,11 +378,15 @@ fun MainDashboard(
 
     // Report Create Dialog
     if (isReportDialogOpen) {
+        val reportImageModeration by viewModel.reportImageModeration.collectAsStateWithLifecycle()
         CreateReportDialog(
             initialReporter = currentUser?.fullName ?: "",
+            imageModerationState = reportImageModeration,
+            onImageSelected = { uri -> viewModel.validateReportImage(uri) },
+            onImageRemoved = { viewModel.resetReportImageModeration() },
             onDismiss = { viewModel.closeReportDialog() },
-            onSave = { title, description, category, severity, location, reportedBy ->
-                viewModel.saveReport(title, description, category, severity, location, reportedBy)
+            onSave = { title, description, category, severity, location, reportedBy, imageUriString ->
+                viewModel.saveReport(title, description, category, severity, location, reportedBy, imageUriString)
             }
         )
     }

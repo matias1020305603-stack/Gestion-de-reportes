@@ -146,9 +146,6 @@ fun LoginScreen(
                 onClick = {
                     selectedRole = UserRoles.SERVICIOS_GENERALES
                     errorMessage = ""
-                    // Sugerir credenciales pre-registradas para facilidad inmediata
-                    if (emailOrUser.isBlank()) emailOrUser = "servicios"
-                    if (password.isBlank()) password = "123"
                 },
                 modifier = Modifier.weight(1.1f)
             )
