@@ -13,6 +13,8 @@ import com.example.data.model.TaskEntity
 import com.example.data.model.TaskPriority
 import com.example.data.model.UserEntity
 import com.example.data.repository.TaskReportRepository
+import com.google.firebase.Firebase
+import com.google.firebase.auth.auth
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
